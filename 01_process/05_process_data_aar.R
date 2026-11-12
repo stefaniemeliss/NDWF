@@ -1,11 +1,4 @@
-# Schools, pupils and their characteristics #
-
-# This release contains the latest statistics on school and pupil numbers and their characteristics, 
-# including age, gender, free school meals (FSM) eligibility, English as an additional language, ethnicity, school characteristics, class sizes.
-# The publication combines information from the school census, school level annual school census, 
-# general hospital school census and alternative provision census.
-
-# The most recently published data is from the school census which took place on 18th January 2024 (Spring census)
+# Academies' Accounts Returns (AAR) #
 
 options(scipen = 999)
 # empty work space
@@ -61,7 +54,7 @@ source_code <- function(root_dir_name = "code", target_repo = "helper_functions"
 }
 
 # source functions
-source_code(target_repo = "DfE_data", file_name = "functions.R")
+source_code(target_repo = "NDWF", file_name = "functions.R")
 
 # define directories
 get_directory()
@@ -74,17 +67,10 @@ dir_in <- file.path(dir_data, "academies-accounts-returns")
 
 # determine year list (akin to other data sources)
 years_list <- paste0(20, 16:24, 17:25)
-lookup <- data.frame(time_period = as.numeric(years_list),
-                     academic_year = as.numeric(substr(years_list, 1, 4)))
-
 
 # determine years of interest
 start <- 2016
 finish <- 2024
-
-# Define NA values first
-na_values <- c(":", "z", "NULL", "Unknown", "x", "..", "", ">", "^")
-
 
 # Get Information about Schools #
 
@@ -107,8 +93,6 @@ gias <- gias[!duplicated(gias), c("LAESTAB", "URN", "ESTAB_NAME")]
 ## 3. Use bind_rows() for Efficient Combining
 ## 4. Clean id information
 
-# pupils on roll #
-
 # list data files
 files <- list.files(path = dir_in,
                     pattern = "AAR",
@@ -125,36 +109,42 @@ column_lookup_aar <- tibble(
     "academy_type",
     "trust_name",
     
+    # dates
     "date_opened",
     "date_closed",
     "date_left",
     "date_joined",
     
-    "num_pup",
-    "num_teach",
+    # teacher and pupil population
+    "fte_teachers",
+    "fte_pup",
+    "perc_pup_fsm",
+    "num_pup_sen_ehcp",
+    "perc_pup_sen_support",
     
     # totals
     "income_tot",
     "expend_tot",
     
     # Direct teaching labour plus closely related teaching support
+    "cost_staff_pay_tot",
     "cost_staff_pay_teaching",
     "cost_staff_pay_supply_teaching",
     "cost_staff_pay_agency_supply_teaching", 
     "cost_staff_pay_education_support",
+    "cost_staff_pay_educational_consultancy",
+    
+    # Other staff-related costs
     "cost_staff_development_training",
     "cost_staff_insurance_supply_teacher",
     "cost_staff_insurance_staff_related",
-    "cost_staff_indirect_employee_expenses",
-    "cost_staff_tot",
+    "cost_staff_indirect_expenses",
     
     # Teaching resources
-    "cost_teaching_resources_non_ict",
-    "cost_teaching_resources_ict",
-    "cost_teaching_resources_exam_fees",
-    "cost_teaching_resources_educational_consultancy",
-    "cost_teaching_resources_educational_supplies",
-    "cost_teaching_resources_brought_in_prof_services"
+    "cost_education_supplies_tot",
+    "cost_education_supplies_non_ict",
+    "cost_education_supplies_exam_fee",
+    "cost_education_ict"
     
   ),
   
@@ -169,35 +159,44 @@ column_lookup_aar <- tibble(
     
     c("MAT SAT or Central Services", "MAT/SAT"),
     c("Trust or Company Name", "Company Name"),
+    
+    # dates
     c("Date opened"),
     c("Date closed"),
     c("Date left if in period", "Date left or closed if in period"),
     c("Date joined if in period", "Date joined or opened if in period"),
-    
-    c("No Pupils", "Number of pupils in academy (FTE)", "Number of pupils in academy (FTE) plus dual subsidiary registrations"),
+
+    # teacher and pupil population
     c("No Teachers", "Number of teachers in academy (FTE)"),
+    c("No Pupils", "Number of pupils in academy (FTE)", "Number of pupils in academy (FTE) plus dual subsidiary registrations"),
     
+    c("% of pupils eligible for FSM"),
+    c("% of pupils with SEN Statement", "% of pupils with EHCP", "% of pupils with an EHCP"),
+    c("% of pupils without SEN Statement", "% of pupils with SEN support", "% of pupil with SEN support"),
+    
+    # totals
     c("Total Income"),
     c("Total Expenditure"),
     
     # Direct teaching labour plus closely related teaching support
+    c("Staff Total", "Total Staff Costs"),
     c("Teaching staff"),
     c("Supply teaching staff"),
     c("Agency supply teaching staff"), 
     c("Education support staff"),
+    c("Educational Consultancy"),
+    
+    # Other staff-related costs
     c("Staff development and training"),
     c("Supply teacher insurance"),
-    c("Indirect employee expenses"),
     c("Staff-related insurance"),
-    c("Staff Total", "Total Staff Costs"),
+    c("Indirect employee expenses"),
     
     # Teaching resources
-    c("Learning resources (not ICT equipment)"),
-    c("ICT learning resources"),
-    c("Examination fees"),
-    c("Educational Consultancy"),
     c("Educational Supplies", "Total Costs of Educational Supplies"),
-    c("Brought in Professional Sevices", "Brought in Professional Services", "Costs of Brought in Professional Services")
+    c("Learning resources (not ICT equipment)"),
+    c("Examination fees"),
+    c("ICT learning resources")
     
   )
   
@@ -218,21 +217,11 @@ for (i in seq_along(start:finish)) {
   
   # determine academic year
   academic_year <- paste0(year,"-", year+1)
-  
   time_period <- as.numeric(gsub("-20", "", academic_year, fixed = T))
-  # academic_year <- gsub("-20", "-", academic_year, fixed = T)
-  
+
   # read in data
-  # 2016/17 - 3:7014
-  # 2017/18 - 3:8153
-  # 2018/19 - 3:8932
-  # 
-  # aar <- xlsx::read.xlsx(files[1], sheetIndex = 2, startRow = 3, endRow = 7014)
   if(year >= 2023) skipped <- 1 else skipped = 2
-  aar <- readxl::read_excel(path = files[i], sheet = 2, skip = skipped, na = c("", "NA","DNS", "NS", "n/a", "NULL"))
-  
-  # print(gsub("-20", "-", academic_year, fixed = T))
-  # print(names(aar))
+  aar <- readxl::read_excel(path = files[i], sheet = 2, skip = skipped, na = c("", "NA","DNS", "NS", "n/a", "NULL", ".."))
   
   # add time period
   aar$time_period <- time_period
@@ -243,9 +232,6 @@ for (i in seq_along(start:finish)) {
   # re-order columns
   aar <- aar[, intersect(column_lookup_aar$standard_name, names(aar))]
   
-  # print(gsub("-20", "-", academic_year, fixed = T))
-  # print(column_lookup_aar$standard_name[! column_lookup_aar$standard_name %in% names(aar)])
-  
   # subset to exclude any non-school level data
   aar <- aar %>% filter(!is.na(urn) & urn != "" & urn != 0)
   
@@ -253,28 +239,19 @@ for (i in seq_along(start:finish)) {
   aar <- aar %>%
     mutate(across(starts_with("date_"), to_posixct_safe))
   
-  # # there may be more than one row per URN, e.g., when a SAT joined a MAT throughout the year
-  # aar2 <- aar %>%
-  #   group_by(time_period, urn, laestab, school_name, num_pup, num_teach) %>%
-  #   summarise(
-  #     across(
-  #       starts_with("period") | starts_with("cost") | starts_with("income") | starts_with("expend"),
-  #       ~ sum(.x, na.rm = TRUE)
-  #     ), .groups = "drop"
-  #   )
-  
+  # there may be more than one row per URN, e.g., when a SAT joined a MAT throughout the year
   aar <- aar %>%
     group_by(urn) %>%
     mutate(row_index = row_number()) %>%
     ungroup()
   
-  check <- aar %>% group_by(urn) %>% filter(n() > 1) %>% print(n =9999)
+  # check <- aar %>% group_by(urn) %>% filter(n() > 1)
   
+  # split data so that URNs are unique in each
   aar1 <- aar %>%
     filter(row_index == 1)
   aar2 <- aar %>%
     filter(row_index == 2)
-  
   
   # check if any school has more than one entry
   if (nrow(aar1 %>% group_by(urn) %>% filter(n() > 1)) != 0) message(sprintf("Data from %s has at least one URN with more than one entry.", academic_year))
@@ -282,16 +259,13 @@ for (i in seq_along(start:finish)) {
   if (nrow(aar2 %>% group_by(urn) %>% filter(n() > 1)) != 0) message(sprintf("Data from %s has at least one URN with more than one entry.", academic_year))
   if (nrow(aar2 %>% group_by(laestab) %>% filter(n() > 1)) != 0) message(sprintf("Data from %s has at least one LAESTAB with more than one entry.", academic_year))
   
-  print(nrow(aar1))
   # match with GIAS: check urns and clean up data
   aar1 <- cleanup_data(data_in = aar1)
-  print(nrow(aar1))
-  
-  print(nrow(aar2))
+
   # match with GIAS: check urns and clean up data
   aar2 <- cleanup_data(data_in = aar2)
-  print(nrow(aar2))
-  
+
+  # combine data again
   aar <- bind_rows(
     aar1 %>%
       rename(urn_aar = urn_aar1,
@@ -304,77 +278,13 @@ for (i in seq_along(start:finish)) {
   # Store processed dataset in list with academic year (encoded as time_period) as name
   ud_all[[academic_year]] <- aar
   
+  # Print progress
+  cat(paste("Processed", academic_year, "- Rows:", nrow(aar), "Columns:", ncol(aar), "\n\n\n"))
+  
+  # remove year files
+  rm(aar1, aar2, aar)
+  gc()
 }
-
-
-# for (i in seq_along(start:finish)) {
-#   year = c(start:finish)[i]
-#   
-#   # determine academic year
-#   academic_year <- paste0(year,"-", year+1)
-#   time_period <- as.numeric(gsub("-20", "", academic_year))
-#   
-#   # read in data: Use fread with more robust settings
-#   spc <- fread(files_pupils[i], 
-#                  fill = Inf,                    # whole file is read for detecting the number of columns.
-#                  sep = ",",                     # Explicitly set separator
-#                  quote = "\"",                  # Handle quoted fields
-#                  strip.white = TRUE,            # Remove whitespace
-#                  blank.lines.skip = TRUE,       # Skip empty lines
-#                  encoding = "Latin-1",          # Handle encoding issues
-#                  na.strings = na_values,        # IMPORTANT: Convert NA values during read
-#                  header = TRUE,                 # use column names from file
-#                  nrows = -1,                    # Read all rows
-#                  showProgress = FALSE)    
-#   
-#   # Convert to data.frame
-#   spc <- as.data.frame(spc)
-#   
-#   # change col names
-#   names(spc) <- tolower(gsub(".", "_", names(spc), fixed = T))
-#   names(spc) <- gsub(" ", "_", names(spc), fixed = T)
-#   names(spc) <- gsub("%", "perc", names(spc), fixed = T)
-#   
-#   # add time period
-#   spc$time_period <- time_period
-#   
-#   # **standardise COLUMN NAMES**
-#   spc <- standardise_column_names(spc, lookup = reverse_lookup_pupils)
-#   
-#   # re-order columns
-#   spc <- spc[, intersect(column_lookup_pupils$standard_name, names(spc))]
-#   
-#   # subset to exclude any non-school level data
-#   spc <- spc %>% filter(urn != "" & urn != 0)
-#   
-#   # replace NA in LAESTAB where possible
-#   if("laestab" %in% names(spc)) {
-#     
-#     spc$laestab <- ifelse(is.na(spc$laestab) & !is.na(spc$old_la_code) & !is.na(spc$estab),
-#                           as.numeric(paste0(spc$old_la_code, spc$estab)),
-#                           spc$laestab)
-#   } else {
-#     spc$laestab <- ifelse(!is.na(spc$old_la_code) & !is.na(spc$estab),
-#                           as.numeric(paste0(spc$old_la_code, spc$estab)),
-#                           NA)
-#   }
-#   
-#   # check if any school has more than one entry
-#   if (nrow(spc %>% group_by(urn) %>% filter(n() > 1)) != 0) message(sprintf("Data from %s has at least one URN with more than one entry.", academic_year))
-#   if (nrow(spc %>% group_by(laestab) %>% filter(n() > 1)) != 0) message(sprintf("Data from %s has at least one LAESTAB with more than one entry.", academic_year))
-#   
-#   # match with GIAS: check urns and clean up data
-#   spc <- cleanup_data(data_in = spc)
-# 
-#   # Store processed dataset in list with academic year (encoded as time_period) as name
-#   ud_all_p[[academic_year]] <- spc
-#   
-#   # Print progress
-#   cat(paste("Processed", academic_year, "- Rows:", nrow(spc), "Columns:", ncol(spc), "\n\n\n"))
-#   
-#   rm(spc)
-#   gc()
-# }
 
 # **BIND ALL DATASETS TOGETHER**
 # Get all unique column names across all datasets
@@ -398,7 +308,6 @@ column_lookup_aar$standard_name[! column_lookup_aar$standard_name %in% names(ud_
 # re-order columns
 ud_aar <- ud_aar %>%
   relocate(time_period, ESTAB_NAME, LAESTAB, URN, laestab_aar, urn_aar) %>%
-  relocate(intersect(column_lookup_aar$standard_name, names(ud_aar)), .after = urn_aar) %>%
   select(-c(academic_year, row_index)) %>%
   arrange(LAESTAB, time_period) %>%
   as.data.frame()
