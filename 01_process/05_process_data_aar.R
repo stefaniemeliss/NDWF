@@ -119,7 +119,7 @@ column_lookup_aar <- tibble(
     "fte_teachers",
     "fte_pup",
     "perc_pup_fsm",
-    "num_pup_sen_ehcp",
+    "perc_pup_sen_ehcp",
     "perc_pup_sen_support",
     
     # totals
