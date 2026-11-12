@@ -76,7 +76,7 @@ source_code <- function(root_dir_name = "code", target_repo = "helper_functions"
 }
 
 # source functions
-source_code(target_repo = "DfE_data", file_name = "functions.R")
+source_code(target_repo = "NDWF", file_name = "functions.R")
 
 # Define the base directory
 dir <- get_directory()
