@@ -1,0 +1,330 @@
+#######################################
+#### Get Information about Schools ####
+#######################################
+
+# Get Information about Schools (GIAS) is the Department for Education’s register 
+# for several organisation types and where information on other organisations is 
+# recorded and maintained.
+
+# GIAS is used by the department and key partners to contact establishments, 
+# update systems, perform analysis and inform policy decisions, some of which 
+# carry funding implications.
+
+# Establishment, federation, academy trust and approved local authority users 
+# can access their records by signing into their DfE Sign-in (DSI) account.
+
+# ‘Get Information about Schools’ is a comprehensive database of educational establishments in England. 
+# It contains data on around 65,000 establishments, including academies, maintained schools and children’s centres.
+
+# Get Information about Schools currently contains over 250 data fields for each establishment, 
+# and this number is expected to grow.
+
+# **SEARCH**: This is a register of schools and colleges in England. 
+# You can search for and download information on establishments, establishment groups 
+# (such as a local authority, trust or federation) or governors. 
+# Schools, local authorities and academy trusts can also update details by signing in to their DfE Sign-in account.
+
+# **DOWNLOAD**: This data is updated daily. The data fields and the order of the data fields can change in these downloads. 
+
+# The difference is Children's centre and Children's centre linked sites are not included in the all establishment data extract (DOWNLOAD) 
+# but they will be included in the results (SEARCH) from the find an establishment search if they are not filtered out.
+
+# Empty the workspace in the global environment except for this function
+rm(list = ls())
+gc()
+
+# create function to source code
+source_code <- function(root_dir_name = "code", target_repo = "helper_functions", branch = "main", file_name = "file.R") {
+  
+  # Construct the raw GitHub URL
+  git_url <- paste0("https://raw.githubusercontent.com/stefaniemeliss/", target_repo, "/", branch, "/", file_name)
+  message("Trying to download: ", git_url)
+  
+  # Attempt to download from GitHub
+  tempp_file <- tempfile(fileext = ".R")
+  download_success <- tryCatch({
+    curl::curl_download(git_url, tempp_file, quiet = FALSE)
+    TRUE
+  }, error = function(e) {
+    message("Download failed: ", e$message)
+    FALSE
+  })
+  
+  if (download_success) {
+    # If successful, source file
+    source(tempp_file)
+    unlink(tempp_file)
+  } else {
+    # Load local copy of file
+    current_dir <- getwd()
+    dir_components <- strsplit(current_dir, "/")[[1]]
+    root_index <- which(dir_components == root_dir_name)
+    if (length(root_index) == 0) {
+      stop(paste("Root directory", root_dir_name, "not found in the current path"))
+    }
+    root_dir <- do.call(file.path, as.list(dir_components[1:root_index]))
+    project_repo <- dir_components[root_index + 1]
+    dir <- file.path(root_dir, project_repo)
+    if (target_repo != project_repo) {
+      dir <- gsub(project_repo, target_repo, dir)
+    }
+    file_path <- file.path(dir, file_name)
+    print(paste("Directory:", dir))
+    print(paste("File path:", file_path))
+    source(file_path, local = parent.frame())
+  }
+}
+
+# source functions
+source_code(target_repo = "DfE_data", file_name = "functions.R")
+
+# Define the base directory
+dir <- get_directory()
+dir_data <- file.path(dir, "data")
+dir_misc <- file.path(dir, "misc")
+
+# Create subfolders if they do not exist
+if (!dir.exists(dir_data)) {
+  dir.create(dir_data)
+}
+
+if (!dir.exists(dir_misc)) {
+  dir.create(dir_misc)
+}
+
+# get file stem name
+file_stem <- get_file_stem()
+
+# Load necessary libraries
+library(data.table)
+
+#### source: https://get-information-schools.service.gov.uk/Downloads ####
+stem <- "extract_gias_download_20260901"
+# date downloaded 01/09/2026
+# Establishment downloads (select all)
+## Establishment fields CSV
+## Establishment links CSV
+
+# Establishment groups
+# All group data (select all)
+## SAT and MAT membership history CSV
+## All group records.csv
+## All group links records.csv
+## All group records with links.zip
+
+
+# process data #
+
+# Establishment fields
+file_fields <- list.files(path = file.path(dir_data, stem), pattern = "^edubasealldata", full.names = T)
+fields <- fread(file = file_fields, encoding = "Latin-1")
+
+# Extract YYYYMMDD from the file name, convert to Date, then format as dd/mm/yyyy if needed
+file_date <- as.Date(stringr::str_extract(basename(file_fields), "[0-9]{8}"), format = "%Y%m%d")
+
+# Add as a Date column
+fields[, downloaddate:= file_date]
+
+# fix col names
+names(fields) <- tolower(names(fields))
+names(fields) <- gsub("(", "", names(fields), fixed = T)
+names(fields) <- gsub(")", "", names(fields), fixed = T)
+names(fields) <- gsub(" ", "_", names(fields), fixed = T)
+
+# convert all character columns to UTF-8
+char_colnames <- names(fields)[sapply(fields, is.character)] # Get the names of character columns
+for (col in char_colnames) {
+ # Apply iconv to each character column 
+  fields[[col]] <- iconv(fields[[col]], from = "latin1", to = "UTF-8")
+}
+
+# replace all "" with NA
+fields <- fields[, lapply(.SD, function(x) replace(x, which(x==""), NA))]
+
+# Ensure laestab_number has leading zeros and concatenate with dfe_number
+fields[, establishmentnumber_str := ifelse(!is.na(establishmentnumber), sprintf("%04d", establishmentnumber), NA)]
+fields[, la_code_str := ifelse(!is.na(la_code), sprintf("%03d", la_code), NA)]
+fields[, dfe_number := ifelse(!is.na(establishmentnumber) & !is.na(la_code), paste0(la_code_str, "/", establishmentnumber_str), NA)]
+fields[, LAESTAB := ifelse(!is.na(establishmentnumber) & la_code != 0, as.numeric(paste0(la_code_str, establishmentnumber_str)), NA)]
+fields$establishmentnumber_str <- NULL
+fields$la_code_str <- NULL
+
+# format dates
+fields[, opendate := as.Date(opendate, format = "%d-%m-%Y")]
+fields[, closedate := as.Date(closedate, format = "%d-%m-%Y")]
+fields[, censusdate := as.Date(censusdate, format = "%d-%m-%Y")]
+
+# fix religion #
+# Create a regex pattern to match Christian denominations
+p <- paste0(c("Church", "Catholic", "Christian", "Anglican", "Methodist", "Adventist", "Evangelical", "Protestant", "Moravian", "Quaker", "Baptist"), collapse = "|")
+
+# Identify Christian denominations
+fields[, religiouscharacter_christian := grepl(pattern = p, religiouscharacter_name, ignore.case = TRUE)]
+
+sum(is.na(fields$boarders_code))
+sum(is.na(fields$boarders_name))
+unique(fields$boarders_code)
+unique(fields$boarders_name[fields$boarders_code == 9])
+
+sum(is.na(fields$admissionspolicy_code))
+sum(is.na(fields$admissionspolicy_name))
+unique(fields$admissionspolicy_code)
+unique(fields$admissionspolicy_name[fields$admissionspolicy_code == 9])
+
+# rename columns
+setnames(fields, "trusts_code", "group_uid")
+setnames(fields, "la_code", "la_number")
+names(fields)
+
+# remove all columns containing a numeric code
+dt <- fields[, .SD, .SDcols = 
+               !grepl("_code", names(fields))]
+
+
+# define col name pattern
+p <- paste0(c(
+  # school identifiers + info on estab type & status
+  "urn", "la_", "estab", "dfe", "census", "downl",
+  # open and close dates + reasons
+  "open", "close", 
+  # age of pupils            
+  "phase", "statut", "nurs", "sixth", 
+  # characteristics of school
+  "boarders", "relig", "dioc", "admiss", "special", "senpru", 
+  # characteristics of pupils
+  "gender", "numberofpupils", "percentagefsm", #"senstat", "sennostat",
+  # info on trusts, federations and sponsors
+  # "trust", "group_uid", "sponsor", "federation",
+  "flag", "trust", "group_uid", #"sponsor", "federation",
+  # location and ONS admin info
+  "urban", "street", "town", "postcode", "gor", "parlia", "district", "ward"), 
+  collapse = "|")
+
+# select cols using pattern
+dt <- dt[, .SD, .SDcols = 
+           grepl(pattern = p, names(dt), ignore.case = T)]
+
+# remove cols not needed
+dt <- dt[, .SD, .SDcols = 
+            ! grepl("previous|boardingestablishment|accred", names(dt))]
+
+# remove "_name" from column names
+names(dt) <- gsub("_name", "", names(dt))
+
+# rename columns
+setnames(dt, "la_number", "la_code")
+setnames(dt, "urn", "URN")
+setnames(dt, "establishmentname", "ESTAB_NAME")
+
+# select and re-order columns
+out <- dt[, .(
+  # school identifiers + info on estab type & status
+  URN, LAESTAB, ESTAB_NAME, dfe_number, la_code, establishmentnumber, censusdate, downloaddate, 
+  # estab status
+  establishmentstatus, opendate, reasonestablishmentopened, closedate, reasonestablishmentclosed,
+  # estab type
+  typeofestablishment, establishmenttypegroup,
+  # age of pupils
+  phaseofeducation, statutorylowage, statutoryhighage, nurseryprovision, officialsixthform,
+  # characteristics of pupils
+  gender, numberofpupils, percentagefsm, #senstat, sennostat,
+  # characteristics of school
+  senpru, specialclasses, boarders, religiouscharacter, religiousethos, diocese, admissionspolicy,
+  # admin
+  trustschoolflag, group_uid, trusts, schoolsponsorflag, federationflag,
+  # address
+  urbanrural, street, postcode, town, gor, la, districtadministrative, administrativeward, parliamentaryconstituency)]
+
+# sort
+setorder(out, URN)
+
+# Establishment links #
+file_links <- list.files(path = file.path(dir_data, stem), pattern = "links_edubasealldata", full.names = T)
+links <- fread(file = file_links, encoding = "Latin-1")
+
+names(links) <- tolower(names(links))
+
+# convert all character columns to UTF-8
+char_colnames <- names(links)[sapply(links, is.character)] # Get the names of character columns
+for (col in char_colnames) {
+  # Apply iconv to each character column 
+  links[[col]] <- iconv(links[[col]], from = "latin1", to = "UTF-8")
+}
+
+# replace all "" with NA
+links <- links[, lapply(.SD, function(x) replace(x, which(x==""), NA))]
+
+# process date
+links[, linkestablisheddate := as.Date(linkestablisheddate, format = "%d-%m-%Y")]
+
+# select columns
+links <- links[, c("urn", "linkurn", "linktype")]
+
+# create counter
+links[, counter := seq_len(.N), by = urn]
+links[, counter := sprintf("%02d", counter)]
+
+# reshape from long to wide
+links <- reshape(links, idvar = "urn", timevar = "counter", direction = "wide", sep = "_")
+
+# add link data
+gias <- merge(out, links, by.x = "URN", by.y = "urn", all.x = T)
+
+# save file
+fwrite(out, file = file.path(dir_data, "data_gias_estab.csv"), bom = T)
+
+# Establishment groups #
+
+# read data
+file_groups <- list.files(path = file.path(dir_data, stem), pattern = "academiesmatmembership", full.names = T)
+groups <- fread(file = file_groups, encoding = "Latin-1")
+
+# fix col names
+names(groups) <- tolower(names(groups))
+names(groups) <- gsub("(", "", names(groups), fixed = T)
+names(groups) <- gsub(")", "", names(groups), fixed = T)
+names(groups) <- gsub(" ", "_", names(groups), fixed = T)
+setnames(groups, "la_code", "la_number")
+
+# convert all character columns to UTF-8
+char_colnames <- names(groups)[sapply(groups, is.character)] # Get the names of character columns
+for (col in char_colnames) {
+  # Apply iconv to each character column 
+  groups[[col]] <- iconv(groups[[col]], from = "latin1", to = "UTF-8")
+}
+
+# replace all "" with NA
+groups <- groups[, lapply(.SD, function(x) replace(x, which(x==""), NA))]
+
+# # filter rows
+# groups <- groups[group_status != "Closed"]
+# groups <- groups[establishmentstatus_name != "Closed"]
+# groups <- groups[group_type == "Multi-academy trust"]
+
+# select cols
+groups <- groups[, .SD, .SDcols = 
+                   grepl("urn|dfe|la_|estab|group", names(groups))]
+
+groups <- groups[, .SD, .SDcols = 
+                   ! grepl("_code|ukprn|companies|street|local|address|town|county|postcode", names(groups))]
+setnames(groups, "la_number", "la_code")
+setnames(groups, "urn", "URN")
+
+# add laestab
+groups[, LAESTAB := as.numeric(gsub("/", "", dfe_number))]
+
+# add region
+lookup <- fields[, la_name, gor_name]
+lookup <- lookup[!duplicated(lookup)]
+lookup <- lookup[!gor_name %in% c("Not Applicable", "Wales (pseudo)")]
+
+groups <- merge(lookup, groups, by = "la_name", all.y = T)
+groups <- groups[!is.na(URN)] # remove MATs without any schools
+
+# remove "_name" from column names
+names(groups) <- gsub("_name", "", names(groups))
+setnames(groups, "establishmentname", "ESTAB_NAME")
+setnames(groups, "group", "GROUP_NAME")
+
+# save file
+fwrite(groups, file = file.path(dir_data, "data_gias_groups.csv"), bom = T)
