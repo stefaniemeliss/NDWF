@@ -12,50 +12,41 @@ gc()
 # create function to source code
 source_code <- function(root_dir_name = "code", target_repo = "helper_functions", branch = "main", file_name = "file.R") {
   
-  # construct URL
+  # Construct the raw GitHub URL
   git_url <- paste0("https://raw.githubusercontent.com/stefaniemeliss/", target_repo, "/", branch, "/", file_name)
+  message("Trying to download: ", git_url)
   
-  # attempt to download from github
+  # Attempt to download from GitHub
   tempp_file <- tempfile(fileext = ".R")
-  message <- curl::curl_download(git_url, tempp_file, quiet = F)
+  download_success <- tryCatch({
+    curl::curl_download(git_url, tempp_file, quiet = FALSE)
+    TRUE
+  }, error = function(e) {
+    message("Download failed: ", e$message)
+    FALSE
+  })
   
-  if(!grepl("Error", message)) {
-    
-    # if successful, source file
+  if (download_success) {
+    # If successful, source file
     source(tempp_file)
-    remove(tempp_file)
-    
-  } else { # load local copy of file
-    
-    # Get the current working directory
+    unlink(tempp_file)
+  } else {
+    # Load local copy of file
     current_dir <- getwd()
-    
-    # Split the current directory into its components
     dir_components <- strsplit(current_dir, "/")[[1]]
-    
-    # Identify the root directory dynamically based on the provided root directory name
     root_index <- which(dir_components == root_dir_name)
     if (length(root_index) == 0) {
       stop(paste("Root directory", root_dir_name, "not found in the current path"))
     }
     root_dir <- do.call(file.path, as.list(dir_components[1:root_index]))
-    
-    # Identify the subdirectory one level below the root and construct its absolute path
     project_repo <- dir_components[root_index + 1]
     dir <- file.path(root_dir, project_repo)
-    
     if (target_repo != project_repo) {
-      dir <- gsub(project_repo, target_repo, dir) 
+      dir <- gsub(project_repo, target_repo, dir)
     }
-    
-    # Construct the full file path
     file_path <- file.path(dir, file_name)
-    
-    # Print the directory and file path for debugging
     print(paste("Directory:", dir))
     print(paste("File path:", file_path))
-    
-    # Source the file into the parent frame
     source(file_path, local = parent.frame())
   }
 }
@@ -89,10 +80,135 @@ gias <- gias[!duplicated(gias), c("LAESTAB", "URN", "ESTAB_NAME")]
 # determine year list (akin to other data sources)
 years_list <- paste0(20, 10:25, 11:26)
 year <- "2025"
-lookup <- data.frame(time_period = as.numeric(years_list),
-                     academic_year = as.numeric(substr(years_list, 1, 4)))
 
-# Pupil to teacher ratios - school level #
+#### Occasional teachers - school level #### 
+
+# read in data
+occ <- read.csv(file.path(dir_in, year, "data", paste0("occasional_teachers_school_2010_", year, ".csv")))
+
+occ <- occ %>%
+  # rename columns 
+  rename_with(., ~tolower(gsub("X...", "", ., fixed = T))) %>% 
+  # remove columns that are uninformative
+  select(where(~length(unique(na.omit(.x))) > 1)) %>%
+  # replace character values with NA
+  mutate(across(
+    where(is.character),
+    ~replace_values(., c("x", "z", "c", "u") ~ NA)
+  )) %>%
+  # remove all rows were school urn was suppressed
+  filter(!is.na(school_urn)) %>%
+  # make all columns numeric
+  mutate(across(
+    .cols = -c(region_code, region_name, new_la_code, la_name, school_name, qts_status),
+    .fns = as.numeric
+  )) %>%
+  as.data.frame()
+
+# select columns
+occ <- occ[, grepl("time_period|urn|laestab|qts|head", names(occ))]
+
+# make wide
+occ <- tidyr::pivot_wider(occ %>%
+                            mutate(qts_status = tolower(qts_status)), 
+                          id_cols = 1:3, 
+                          names_from = qts_status, 
+                          values_from = headcount,
+                          names_prefix = "hc_occ_")
+
+# check urns and clean up data
+occ <- cleanup_data(data_in = occ)
+
+#### Teacher absences - school level ####
+
+# read in data
+abs <- read.csv(file.path(dir_in, year, "data", paste0("sickness_absence_teachers_2010_", year, "_sch.csv")))
+
+abs <- abs %>%
+  # rename columns 
+  rename_with(., ~tolower(gsub("X...", "", ., fixed = T))) %>% 
+  # remove columns that are uninformative
+  select(where(~length(unique(na.omit(.x))) > 1)) %>%
+  # replace character values with NA
+  mutate(across(
+    where(is.character),
+    ~replace_values(., c("x", "z", "c", "u") ~ NA)
+  )) %>%
+  # filter for 2010/11 onwards
+  filter(time_period > 200910) %>%
+  # make all columns numeric
+  mutate(across(
+    .cols = -c(region_code, region_name, new_la_code, la_name, school_name, school_type),
+    .fns = as.numeric
+  )) %>%
+  as.data.frame()
+
+# select columns
+abs <- abs[, grepl("time_period|urn|laestab|abs|day|school", names(abs))]
+abs <- abs[, !grepl("code|type", names(abs))]
+
+# check urns and clean up data
+abs <- cleanup_data(data_in = abs)
+
+#### Teacher vacancies - school level ####
+
+# read in data
+vac <- read.csv(file.path(dir_in, year, "data", paste0("vacancies_number_rate_sch_2010_", year, ".csv")))
+
+vac <- vac %>%
+  # rename columns 
+  rename_with(., ~tolower(gsub("X...", "", ., fixed = T))) %>% 
+  # remove columns that are uninformative
+  select(where(~length(unique(na.omit(.x))) > 1)) %>%
+  # replace character values with NA
+  mutate(across(
+    where(is.character),
+    ~replace_values(., c("x", "z", "c", "u") ~ NA)
+  )) %>%
+  # make all columns numeric
+  mutate(across(
+    .cols = -c(region_code, region_name, new_la_code, la_name, school_name, establishment_type_group),
+    .fns = as.numeric
+  )) %>%
+  as.data.frame()
+
+# select columns
+vac <- vac[, grepl("time_period|urn|laestab|school|vac|rate|temp", names(vac))]
+
+# check urns and clean up data
+vac <- cleanup_data(data_in = vac)
+
+
+#### Teacher turnover - school level ####
+
+# read in data
+tto <- read.csv(file.path(dir_in, year, "data", paste0("teacher_turnover_2010_", year, "_sch.csv")))
+
+tto <- tto %>%
+  # rename columns 
+  rename_with(., ~tolower(gsub("X...", "", ., fixed = T))) %>% 
+  # remove columns that are uninformative
+  select(where(~length(unique(na.omit(.x))) > 1)) %>%
+  # replace character values with NA
+  mutate(across(
+    where(is.character),
+    ~replace_values(., c("x", "z", "c", "u") ~ NA)
+  )) %>%
+  # make all columns numeric
+  mutate(across(
+    .cols = -c(school_name, establishment_type_group),
+    .fns = as.numeric
+  )) %>%
+  as.data.frame()
+
+# select columns
+tto <- tto[, !grepl("establishment", names(tto))]
+
+# check urns and clean up data
+tto <- cleanup_data(data_in = tto)
+
+
+#### Pupil to teacher ratios - school level ####
 
 # read in data
 ptr <- read.csv(file.path(dir_in, year, "data", paste0("workforce_ptrs_2010_", year, "_sch.csv")))
@@ -122,7 +238,7 @@ ptr <- ptr[, grepl("time_period|urn|laestab|fte|ratio|school", names(ptr))]
 # check urns and clean up data
 ptr <- cleanup_data(data_in = ptr)
 
-# Size of the school workforce - school level #
+#### Size of the school workforce - school level ####
 
 # read in data
 swf <- read.csv(file.path(dir_in, year, "data", paste0("Workforce_2010_2025_fte_hc_sch.csv")))
@@ -150,7 +266,7 @@ swf <- swf[, !grepl("fte_ft|fte_pt|hc_pt|hc_ft|code|type|region|la_", names(swf)
 # check urns and clean up data
 swf <- cleanup_data(data_in = swf)
 
-# Workforce teacher characteristics - school level #
+#### Workforce teacher characteristics - school level ####
 
 pattern_wtc <- "workforce_teacher_characteristics_school_201011_202526"
 dir_wtc <- file.path(dir_in, year, "supporting-files")
@@ -243,20 +359,6 @@ teach_char <- teach_char %>%
                                                                            if_else(ethnicity_major != "Total", "ethnicity_major", "total"
                                                                            )))))))
   ) %>%
-  # # re-compute the percentages 
-  # # determine total
-  # mutate(
-  #   hc_total = first(hc[characteristic_group == "total"]),
-  #   fte_total = first(fte[characteristic_group == "total"]),
-  #   .by = c(time_period, school_urn)
-  # ) %>%
-  # # re-compute percentages
-  # mutate(
-  #   fte_perc = fte / fte_total * 100,
-  #   hc_perc = hc / hc_total * 100
-  # ) %>%
-  # # drop total columns
-  # select(-c(hc_total, fte_total)) %>%
   as.data.frame()
 gc()
 
@@ -327,74 +429,6 @@ na_count$var = row.names(na_count)
 rm(na_count)
 gc()
 
-# MUTATE data - OMITTED
-# wtc <- wtc %>%
-#   mutate(
-#     # fill gaps in total data: grade chosen here but could have also used age, ethnicity, pattern or qts
-#     tmp_hc = rowSums(across(matches("hc_grade")), na.rm = T),
-#     hc = ifelse(is.na(hc), tmp_hc, hc),
-#     tmp_fte = rowSums(across(matches("fte_grade")), na.rm = T),
-#     fte = ifelse(is.na(fte), tmp_fte, fte)
-#     ,
-#     # fill NAs with zeros where possible: GENDER
-#     # tmp = get HC count based on all gender columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all gender columns
-#     tmp = rowSums(across(matches("hc_gender_")), na.rm = T),
-#     across(matches("hc_gender_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_gender_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_gender_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_gender_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # fill NAs with zeros where possible: AGE
-#     # tmp = get HC count based on all age columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all age columns
-#     tmp = rowSums(across(matches("hc_age_")), na.rm = T),
-#     across(matches("hc_age_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_age_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_age_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_age_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # fill NAs with zeros where possible: ETHNICITY
-#     # tmp = get HC count based on all ethnicity columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all ethnicity columns
-#     tmp = rowSums(across(matches("hc_ethnicity_")), na.rm = T),
-#     across(matches("hc_ethnicity_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_ethnicity_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_ethnicity_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_ethnicity_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # fill NAs with zeros where possible: GRADE
-#     # tmp = get HC count based on all grade columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all grade columns
-#     tmp = rowSums(across(matches("hc_grade_")), na.rm = T),
-#     across(matches("hc_grade_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_grade_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_grade_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_grade_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # fill NAs with zeros where possible: PATTERN
-#     # tmp = get HC count based on all pattern columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all pattern columns
-#     tmp = rowSums(across(matches("hc_pattern_")), na.rm = T),
-#     across(matches("hc_pattern_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_pattern_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_pattern_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_pattern_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # fill NAs with zeros where possible: QTS
-#     # tmp = get HC count based on all qts columns
-#     # if count is equal to HC (tmp == hc), then replace NA with 0 in all qts columns
-#     tmp = rowSums(across(matches("hc_qts_")), na.rm = T),
-#     across(matches("hc_qts_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_qts_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("hc_perc_qts_"), ~ifelse(tmp == hc & is.na(.), 0, .)),
-#     across(matches("fte_perc_qts_"), ~ifelse(tmp == hc & is.na(.), 0, .))
-#     ,
-#     # delete tmp
-#     tmp = NULL,
-#     tmp_fte = NULL,
-#     tmp_hc = NULL)
-
 # COMPUTE GROUP AGGREGRATES
 wtc <- wtc %>%
   mutate(
@@ -464,7 +498,7 @@ wtc$tmp_rd <- NULL
 wtc <- cleanup_data(data_in = wtc)
 gc()
 
-# COMBINE ALL DFs #
+#### COMBINE ALL DFs ####
 
 id_cols <- c("time_period", "URN", "LAESTAB", "ESTAB_NAME")
 
@@ -473,6 +507,10 @@ df <- swf %>%
   full_join(., wtc, by = id_cols) %>%
   # merge all dfs
   full_join(., ptr, by = id_cols) %>%
+  full_join(., tto, by = id_cols) %>%
+  full_join(., abs, by = id_cols) %>%
+  full_join(., vac, by = id_cols) %>%
+  full_join(., occ, by = id_cols) %>%
   # sort data
   relocate(LAESTAB, URN, ESTAB_NAME) %>%
   arrange(LAESTAB, time_period) %>% 
