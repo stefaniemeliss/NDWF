@@ -3,3 +3,13 @@
 .RData
 .Ruserdata
 *.Rproj
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.doc
+*.docx
+*.txt
+*.rtf
+*.ods
+*.zip
