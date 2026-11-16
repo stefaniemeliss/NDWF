@@ -1,5 +1,7 @@
 # Academies' Accounts Returns (AAR) #
 
+# AAR data downloaded from: https://financial-benchmarking-and-insights-tool.education.gov.uk/data-sources
+
 options(scipen = 999)
 # empty work space
 rm(list = ls())
@@ -125,9 +127,9 @@ column_lookup_aar <- tibble(
     # totals
     "income_tot",
     "expend_tot",
+    "cost_staff_pay_tot",
     
     # Direct teaching labour plus closely related teaching support
-    "cost_staff_pay_tot",
     "cost_staff_pay_teaching",
     "cost_staff_pay_supply_teaching",
     "cost_staff_pay_agency_supply_teaching", 
@@ -139,6 +141,12 @@ column_lookup_aar <- tibble(
     "cost_staff_insurance_supply_teacher",
     "cost_staff_insurance_staff_related",
     "cost_staff_indirect_expenses",
+    
+    # Non-educational support staff and services
+    "cost_staff_pay_admin_clerical",
+    "cost_staff_pay_auditors",
+    "cost_staff_pay_other",
+    "cost_staff_pay_legal_professional",
     
     # Teaching resources
     "cost_education_supplies_tot",
@@ -177,9 +185,9 @@ column_lookup_aar <- tibble(
     # totals
     c("Total Income"),
     c("Total Expenditure"),
+    c("Staff Total", "Total Staff Costs"),
     
     # Direct teaching labour plus closely related teaching support
-    c("Staff Total", "Total Staff Costs"),
     c("Teaching staff"),
     c("Supply teaching staff"),
     c("Agency supply teaching staff"), 
@@ -192,6 +200,12 @@ column_lookup_aar <- tibble(
     c("Staff-related insurance"),
     c("Indirect employee expenses"),
     
+    # Non-educational support staff and services
+    c("Administrative and clerical staff"),
+    c("Auditor costs"),
+    c("Other staff"),
+    c("Legal & Professional", "Legal & Professionalservices", "Legal & Professional services"),
+
     # Teaching resources
     c("Educational Supplies", "Total Costs of Educational Supplies"),
     c("Learning resources (not ICT equipment)"),
