@@ -173,7 +173,7 @@ column_lookup_aar <- tibble(
     c("Date closed"),
     c("Date left if in period", "Date left or closed if in period"),
     c("Date joined if in period", "Date joined or opened if in period"),
-
+    
     # teacher and pupil population
     c("No Teachers", "Number of teachers in academy (FTE)"),
     c("No Pupils", "Number of pupils in academy (FTE)", "Number of pupils in academy (FTE) plus dual subsidiary registrations"),
@@ -205,7 +205,7 @@ column_lookup_aar <- tibble(
     c("Auditor costs"),
     c("Other staff"),
     c("Legal & Professional", "Legal & Professionalservices", "Legal & Professional services"),
-
+    
     # Teaching resources
     c("Educational Supplies", "Total Costs of Educational Supplies"),
     c("Learning resources (not ICT equipment)"),
@@ -232,7 +232,7 @@ for (i in seq_along(start:finish)) {
   # determine academic year
   academic_year <- paste0(year,"-", year+1)
   time_period <- as.numeric(gsub("-20", "", academic_year, fixed = T))
-
+  
   # read in data
   if(year >= 2023) skipped <- 1 else skipped = 2
   aar <- readxl::read_excel(path = files[i], sheet = 2, skip = skipped, na = c("", "NA","DNS", "NS", "n/a", "NULL", ".."))
@@ -275,10 +275,10 @@ for (i in seq_along(start:finish)) {
   
   # match with GIAS: check urns and clean up data
   aar1 <- cleanup_data(data_in = aar1)
-
+  
   # match with GIAS: check urns and clean up data
   aar2 <- cleanup_data(data_in = aar2)
-
+  
   # combine data again
   aar <- bind_rows(
     aar1 %>%
@@ -319,22 +319,98 @@ ud_aar <- bind_rows(ud_stan, .id = "academic_year")
 # check that no column is missing
 column_lookup_aar$standard_name[! column_lookup_aar$standard_name %in% names(ud_aar)]
 
+# check NAs
+# NAs for date_closed in 2018/19 and 2020/21 but column names are correct
+for (i in 1:length(unique(ud_aar$time_period))) {
+  
+  print(unique(ud_aar$time_period)[i])
+  
+  tmp <- apply(ud_aar[ud_aar$time_period == unique(ud_aar$time_period)[i], ], 2, function(x){sum(is.na(x))})
+  print(tmp[tmp == nrow(ud_aar[ud_aar$time_period == unique(ud_aar$time_period)[i], ])])
+}
+
+# compute totals for categories
+ud_aar <- ud_aar %>%
+  mutate(
+    # --- Categories as defined in Benchmark spending tool --- #
+    # https://financial-benchmarking-and-insights-tool.education.gov.uk/guidance/cost-categories
+    
+    # Total teaching and teaching support staff costs #
+    # Teaching staff costs: cost_staff_pay_teaching (BAE010)
+    # Supply teaching staff costs: cost_staff_pay_supply_teaching (BAE020)
+    # Educational consultancy costs: cost_staff_pay_educational_consultancy (BAE230)
+    # Educational support staff costs: cost_staff_pay_education_support (BAE030)
+    # Agency supply teaching staff costs: cost_staff_pay_agency_supply_teaching (BAE240)
+    cost_staff_pay_tot_teach_teachsupp = 
+      rowSums(across(c(cost_staff_pay_teaching, 
+                       cost_staff_pay_supply_teaching, 
+                       cost_staff_pay_agency_supply_teaching,
+                       cost_staff_pay_education_support,
+                       cost_staff_pay_educational_consultancy)), na.rm = T),
+    
+    # Non-educational support staff and services #
+    # Administrative and clerical staff costs (BAE040)
+    # Auditors costs (BAE260)
+    # Other staff costs (BAE070)
+    # Professional services (non-curriculum) costs (BAE300)
+    cost_staff_pay_tot_nonedu_support = 
+      rowSums(across(c(cost_staff_pay_admin_clerical, 
+                       cost_staff_pay_auditors, 
+                       cost_staff_pay_other,
+                       cost_staff_pay_legal_professional)), na.rm = T),
+    
+    # Other staff-related costs #
+    # Indirect employee expenses (BAE080)
+    # Staff development and training costs (BAE090)
+    # Staff-related insurance costs (BAE110)
+    # Supply teacher insurance costs (BAE100)
+    cost_staff_other_tot = 
+      rowSums(across(c(cost_staff_development_training, 
+                       cost_staff_insurance_supply_teacher, 
+                       cost_staff_insurance_staff_related,
+                       cost_staff_indirect_expenses)), na.rm = T),
+    
+    # Total educational supplies costs #
+    # Examination fees costs (BAE220)
+    # Learning resources (not ICT equipment) costs (BAE200)
+    # Educational ICT learning resources costs (BAE210)
+    cost_education_tot = 
+      rowSums(across(c(cost_education_supplies_exam_fee, 
+                       cost_education_supplies_non_ict,
+                       cost_education_ict)), na.rm = T),
+    
+    
+    # --- Categories required for cost evaluation (comment from Luke Sibierta) --- #
+    
+    # Total spending on teachers #
+    cost_staff_tot_teach = 
+      rowSums(across(c(cost_staff_pay_teaching,
+                       cost_staff_development_training,
+                       cost_staff_insurance_staff_related,
+                       cost_staff_indirect_expenses)), na.rm = T),
+    
+    # Total spending on teaching support staff #
+    cost_staff_tot_teachsupp = 
+      rowSums(across(c(cost_staff_pay_education_support,
+                       cost_staff_pay_educational_consultancy)), na.rm = T),
+    
+    # Total spending on non-teaching support staff #
+    cost_staff_tot_nonedu_support = cost_staff_pay_tot_nonedu_support,
+    
+    # Total spending on supply cover #
+    cost_staff_tot_supply = 
+      rowSums(across(c(cost_staff_pay_supply_teaching, 
+                       cost_staff_pay_agency_supply_teaching,
+                       cost_staff_insurance_supply_teacher)), na.rm = T)
+    
+  )
+
 # re-order columns
 ud_aar <- ud_aar %>%
   relocate(time_period, ESTAB_NAME, LAESTAB, URN, laestab_aar, urn_aar) %>%
   select(-c(academic_year, row_index)) %>%
   arrange(LAESTAB, time_period) %>%
   as.data.frame()
-
-# check NAs
-# NAs for date_closed in 2018/19 and 2020/21 but column names are correct
-for (i in 1:length(unique(ud_aar$time_period))) {
-  
-  print(unique(ud_aar$time_period)[i])
-
-  tmp <- apply(ud_aar[ud_aar$time_period == unique(ud_aar$time_period)[i], ], 2, function(x){sum(is.na(x))})
-  print(tmp[tmp == nrow(ud_aar[ud_aar$time_period == unique(ud_aar$time_period)[i], ])])
-}
 
 
 
