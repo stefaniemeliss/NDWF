@@ -1,0 +1,249 @@
+---
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+
+
+```{r, echo=FALSE, results='asis'}
+# add headlines
+cat("\n\n#", gias_treated$ESTAB_NAME[gias_treated$URN == urn_school], "\n\n")
+
+# print some information about the school
+cat("Type of establishment:", gias_treated$typeofestablishment[gias_treated$URN == urn_school], "\n\n")
+cat("Phase:", gias_treated$phaseofeducation[gias_treated$URN == urn_school], "\n\n")
+cat("Gender of pupils:", gias_treated$gender[gias_treated$URN == urn_school], "\n\n")
+cat("Religious character:", gias_treated$religiouscharacter[gias_treated$URN == urn_school], "\n\n")
+cat("Local authority:", gias_treated$la[gias_treated$URN == urn_school], "\n\n")
+cat("Region:", gias_treated$gor[gias_treated$URN == urn_school], "\n\n")
+
+
+# download comparison data
+url <- paste0("https://financial-benchmarking-and-insights-tool.education.gov.uk/school/", urn_school, "/comparison/download")
+file_name <- file.path(dir_tmp, paste0(urn_school, ".zip"))
+download.file(url, destfile = file_name, mode = "wb")
+zip::unzip(file_name, exdir = dir_tmp)
+invisible(file.remove(file_name))
+
+# Benchmark spending: define comparator dfs
+# 30 similar schools to benchmark this school against running cost categories, which includes all staffing (excluding premises staff), ICT, consultancy and catering.
+df_comp_pupil <- read.csv(file = file.path(dir_tmp, paste0("comparison-", urn_school, "-pupil.csv")))
+
+# extract comparator URNs after removing any treated schools
+urn_comp <- df_comp_pupil %>%
+  filter(! URN %in% urn_treated) %>%
+  pull(URN)
+
+# get AAR data for treated school
+aar_school <- aar %>%
+  filter(URN == urn_school)
+
+# get AAR data for comparator schools
+aar_comp <- aar %>%
+  filter(URN %in% urn_comp)
+
+# identify URNs of schools for regional average
+gias_region <- gias %>%
+  tidyr::replace_na(list(admissionspolicy = "unknown", boarders = "unknown")) %>% 
+  filter(
+    grepl("Open", establishmentstatus),
+    ! URN %in% urn_treated,
+    phaseofeducation %in% unique(c(gias_treated$phaseofeducation[gias_treated$URN == urn_school])),
+    gor %in% c(gias_treated$gor[gias_treated$URN == urn_school]),
+    ! parliamentaryconstituency %in% unique(c(gias_treated$parliamentaryconstituency[gias_treated$URN == urn_school])),
+    ! grepl("Boarding school", boarders),
+    admissionspolicy != "Selective"
+  ) %>%
+  as.data.frame()
+
+# extract comparator URNs in same region
+urn_region <- gias_region %>%
+  pull(URN)
+
+# get AAR data for regional average across phase type
+aar_region <- aar %>%
+  filter(URN %in% urn_region)
+
+# combine data
+df <- bind_rows(aar_school %>%
+                  mutate(group = "Treated"), 
+                aar_comp %>%
+                  mutate(group = "Comparator set average")) %>%
+  bind_rows(., aar_region %>%
+              mutate(group = "Regional phase average"))
+
+# actuals #
+cat("\n\n## Actuals\n\n")
+
+# aggregate data
+df_agg <- df %>%
+  group_by(time_period, group) %>%
+  summarise(
+    n = n(),
+    across(
+      matches("^(cost_|income|expend)"),
+      ~ mean(.x, na.rm = TRUE)
+    ), .groups = "drop"
+  ) %>%
+  mutate(time_period_str = insert_slash(time_period))
+
+for (ii in 1:length(vars)) {
+  # plot timeseries for each variable
+  plt <- ggplot(data = df_agg, aes(x = time_period, y = get(vars[ii]), col = group, group = group)) +
+    geom_line() +
+    geom_point() +
+    ambition_theme +
+    ylab("Actuals") + xlab("Academic year") +
+    ggtitle(paste0(urn_school, ": ", vars[ii])) +
+    scale_y_continuous(labels = scales::label_currency(prefix = "£", scale_cut = scales::cut_long_scale())) +
+    scale_x_continuous(breaks = df_agg$time_period, labels = df_agg$time_period_str) +
+    scale_color_manual(values = c("Treated" = red,
+                                  "Regional phase average" = blue,
+                                  "Comparator set average" = navy)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.title = element_blank())
+  print(plt)
+  cat("\n\nNote.",vars[ii], "=", meta$description[meta$column_name == vars[ii]], "\n\n")
+  rm(plt)
+  gc()
+}
+
+
+# per pupil #
+cat("\n\n## Per pupil\n\n")
+
+# aggregate data
+df_agg <- df %>%
+  group_by(time_period, group) %>%
+  summarise(
+    n = n(),
+    across(
+      matches("^(cost_|income|expend)"),
+      ~ mean(.x/fte_pup, na.rm = TRUE)
+    ), .groups = "drop"
+  ) %>%
+  mutate(time_period_str = insert_slash(time_period))
+
+for (ii in 1:length(vars)) {
+  # plot timeseries for each variable
+  plt <- ggplot(data = df_agg, aes(x = time_period, y = get(vars[ii]), col = group, group = group)) +
+    geom_line() +
+    geom_point() +
+    ambition_theme +
+    ylab("Per pupil") + xlab("Academic year") +
+    ggtitle(paste0(urn_school, ": ", vars[ii])) +
+    scale_y_continuous(labels = scales::label_currency(prefix = "£", scale_cut = scales::cut_long_scale())) +
+    scale_x_continuous(breaks = df_agg$time_period, labels = df_agg$time_period_str) +
+    scale_color_manual(values = c("Treated" = red,
+                                  "Regional phase average" = blue,
+                                  "Comparator set average" = navy)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.title = element_blank())
+  print(plt)
+  cat("\n\nNote.",vars[ii], "=", meta$description[meta$column_name == vars[ii]], "\n\n")
+  rm(plt)
+  gc()
+  
+}
+
+# percentage income #
+cat("\n\n## Percentage of income\n\n")
+
+# aggregate data
+df_agg <- df %>%
+  group_by(time_period, group) %>%
+  summarise(
+    n = n(),
+    across(
+      matches("^(cost_staff|income|expend)"),
+      ~ mean(.x/income_tot, na.rm = TRUE)
+    ), .groups = "drop"
+  ) %>%
+  mutate(time_period_str = insert_slash(time_period))
+
+for (ii in 1:length(vars)) {
+  
+  if(grepl("income", vars[ii])) next
+  
+  # determine axis limits
+  if (vars[ii] %in% vars[grepl("tot_teach|teaching", vars) & !grepl("tot_teachsupp", vars)]) {
+    limit = c(0.4, 0.9)
+  } else if (grepl("income|expend", vars[ii])) {
+    limit = c(0.75, 1.25)
+  } else {
+    limit = c(0, 0.5)
+  }
+
+  # plot timeseries for each variable
+  plt <- ggplot(data = df_agg, aes(x = time_period, y = get(vars[ii]), col = group, group = group)) +
+    geom_line() +
+    geom_point() +
+    ambition_theme +
+    ylab("% of income") + xlab("Academic year") +
+    ggtitle(paste0(urn_school, ": ", vars[ii])) +
+    scale_x_continuous(breaks = df_agg$time_period, labels = df_agg$time_period_str) +
+    scale_y_continuous(labels = scales::label_percent(), limits = limit, breaks = seq(0, 2, 0.1)) +
+    scale_color_manual(values = c("Treated" = red,
+                                  "Regional phase average" = blue,
+                                  "Comparator set average" = navy)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.title = element_blank())
+  print(plt)
+  cat("\n\nNote.",vars[ii], "=", meta$description[meta$column_name == vars[ii]], "\n\n")
+  rm(plt)
+  gc()
+}
+
+# percentage expenditure #
+cat("\n\n## Percentage of expenditure\n\n")
+
+# aggregate data
+df_agg <- df %>%
+  group_by(time_period, group) %>%
+  summarise(
+    n = n(),
+    across(
+      matches("^(cost_|income|expend)"),
+      ~ mean(.x/expend_tot, na.rm = TRUE)
+    ), .groups = "drop"
+  ) %>%
+  mutate(time_period_str = insert_slash(time_period))
+
+for (ii in 1:length(vars)) {
+  
+  if(grepl("expend", vars[ii])) next
+  
+  # determine axis limits
+  if (vars[ii] %in% vars[grepl("tot_teach|teaching", vars) & !grepl("tot_teachsupp", vars)]) {
+    limit = c(0.4, 0.9)
+  } else if (grepl("income|expend", vars[ii])) {
+    limit = c(0.75, 1.25)
+  } else {
+    limit = c(0, 0.5)
+  }
+  
+  # plot timeseries for each variable
+  plt <- ggplot(data = df_agg, aes(x = time_period, y = get(vars[ii]), col = group, group = group)) +
+    geom_line() +
+    geom_point() +
+    ambition_theme +
+    ylab("% of expenditure") + xlab("Academic year") +
+    ggtitle(paste0(urn_school, ": ", vars[ii])) +
+    scale_x_continuous(breaks = df_agg$time_period, labels = df_agg$time_period_str) +
+    scale_y_continuous(labels = scales::label_percent(), limits = limit, breaks = seq(0, 2, 0.1)) +
+    scale_color_manual(values = c("Treated" = red,
+                                  "Regional phase average" = blue,
+                                  "Comparator set average" = navy)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.title = element_blank())
+  print(plt)
+  cat("\n\nNote.",vars[ii], "=", meta$description[meta$column_name == vars[ii]], "\n\n")
+  rm(plt)
+  gc()
+  
+}
+
+```
+
